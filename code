@@ -1,0 +1,382 @@
+
+# coding: utf-8
+
+# # Task 1
+
+# In[1]:
+
+
+import numpy as np
+import pandas as pd
+import re
+import jieba
+import random
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.feature_extraction.text import TfidfTransformer
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn import svm
+from sklearn.metrics import precision_recall_fscore_support, roc_curve, roc_auc_score
+from sklearn.metrics import precision_score,recall_score,f1_score,classification_report
+from sklearn.model_selection import cross_val_score
+import matplotlib.pyplot as plt
+from functools import reduce
+from gensim.models import Word2Vec
+from gensim.models.doc2vec import Doc2Vec, TaggedDocument
+
+
+# ### 浣跨敤pandas璇诲叆csv鏁版嵁鏂囦欢
+
+# In[2]:
+
+
+tiku_question = pd.read_csv('../../camp_dataset/data/tiku_question_sx.csv', encoding='utf-8',usecols = ['que_id', 'content'],low_memory=False)
+
+
+# In[3]:
+
+
+tiku_question['content'][1]
+
+
+# ### 鍘婚櫎闈炰腑鏂囧瓧绗﹀拰绌鸿
+
+# In[4]:
+
+
+def chinese_only(text,key_id,content):
+    que_id=[]
+    que_content=[]
+    line_id = []
+    nan_num = 0
+    for i in range(text.shape[0]):
+        line = text[content][i]
+        if not pd.isnull(line):
+            line = ''.join(re.findall(r'[\u4e00-\u9fa5]',line))
+            if not line=='':
+                que_id.append(text[key_id][i])
+                que_content.append(' '.join(jieba.cut(line, cut_all=False)))
+                line_id.append(i+2)
+            else:
+                nan_num += 1
+        else:
+            nan_num += 1
+    print(nan_num,'lines deleted(No Chinese Character)!')
+    return que_id, que_content, line_id, nan_num
+
+
+# In[5]:
+
+
+que_id, que_content, line_id, nan_num = chinese_only(tiku_question,'que_id','content')
+
+
+# ### 璁＄畻璇嶈锛坱f锛宼fidf锛?
+# In[6]:
+
+
+def get_bow(text):
+    vectorizer = CountVectorizer(min_df=1)
+    transformer = TfidfTransformer()
+    tf = vectorizer.fit_transform(text)
+    tfidf = transformer.fit_transform(tf)
+    word = vectorizer.get_feature_names()
+    return tf, tfidf, word
+
+
+# In[7]:
+
+
+tf,tfidf,words = get_bow(que_content)
+
+
+# ### 闅忔満閫夋嫨5閬撻鐩?
+# In[8]:
+
+
+random_q = np.random.randint(0,tf.shape[0],5)
+
+
+# ### 璁＄畻浣欏鸡鐩镐技搴﹀苟杈撳嚭鏈€鐩歌繎鐨?閬撻鐩?
+# In[9]:
+
+
+cosine_tf = cosine_similarity(tf[random_q],tf)
+cosine_tfidf = cosine_similarity(tfidf[random_q],tfidf)
+
+
+# In[10]:
+
+
+for i, r in enumerate(random_q):
+    q_ind_rel = []
+    line2 = cosine_tfidf[i]
+    line2_noself = np.delete(line2, r)
+    q_ind = np.argpartition(line2_noself, -3)[-3:]
+    for m, k in enumerate(q_ind):
+        if k>=r:
+            q_ind_rel.append(line_id[k+1])
+            q_ind[m] = k+1
+        else:
+            q_ind_rel.append(line_id[k])
+    print('闅忔満鎶介€夌殑绗瑊}/5棰橈細 \n\n棰樺彿锛歿}\n棰樼洰鍐呭锛歿}'.format(i+1,line_id[r],que_content[r]),'\n')
+    print('鐩镐技搴︽渶楂樼殑涓変釜棰樼洰涓猴細',q_ind_rel,'\n')
+    print('{:<7d}{}'.format(q_ind_rel[0],que_content[q_ind[0]]))
+    print('{:<7d}{}'.format(q_ind_rel[1],que_content[q_ind[1]]))
+    print('{:<7d}{}'.format(q_ind_rel[2],que_content[q_ind[2]]),'\n')
+
+
+# # Task 2
+
+# ### 璇诲叆鏁版嵁鏂囦欢
+
+# In[11]:
+
+
+knowledge_hierarchy = pd.read_csv('../../camp_dataset/data/knowledge_hierarchy.csv', usecols = ['id', 'name','degree'], encoding = 'utf-8')
+question_knowledge_hierarchy = pd.read_csv('../../camp_dataset/data/question_knowledge_hierarchy_sx.csv',  encoding = 'utf-8')
+
+
+# In[12]:
+
+
+knowledge_hierarchy.head()
+
+
+# ### 瀵绘壘绫诲瀷涓衡€滃嚱鏁颁笌瀵兼暟鈥濆拰鈥滀笁瑙掑嚱鏁颁笌瑙ｄ笁瑙掑舰鈥濈殑棰樼洰id
+
+# In[13]:
+
+
+knowledge_hierarchy[(knowledge_hierarchy['name']==u'涓夎鍑芥暟涓庤В涓夎褰?) | (knowledge_hierarchy['name']==u'鍑芥暟涓庡鏁?) & (knowledge_hierarchy['degree']==1)]
+
+
+# ### 鑾峰彇婊¤冻鏉′欢鐨勯鐩唴瀹?
+# In[14]:
+
+
+#qkh_fun_id = question_knowledge_hierarchy[question_knowledge_hierarchy['kh_id']=='hcwf4avcmp8l53s5iq010pelwlce000d'].loc[:,['question_id']]
+#qkh_tri_id = question_knowledge_hierarchy[question_knowledge_hierarchy['kh_id']=='hcwf4avcmp8l53s5iq010pelwlce0035'].loc[:,['question_id']]
+qkh = question_knowledge_hierarchy[(question_knowledge_hierarchy['kh_id']=='hcwf4avcmp8l53s5iq010pelwlce0035') | (question_knowledge_hierarchy['kh_id']=='hcwf4avcmp8l53s5iq010pelwlce000d')].loc[:,['kh_id','question_id']]
+
+
+# In[15]:
+
+
+tiku_question_new = tiku_question.rename(columns={'que_id':'question_id'})
+#question_fun = pd.merge(qkh_fun_id, tiku_question_new, on='question_id')
+#question_tri = pd.merge(qkh_tri_id, tiku_question_new, on='question_id')
+question_fun_tri = pd.merge(qkh, tiku_question_new, on='question_id')
+
+
+# In[16]:
+
+
+question_fun_tri.head()
+
+
+# ### 璁＄畻tfidf鍊?
+# In[17]:
+
+
+#que_fun_id, que_fun_content, line_fun_id, nan_fun_num = chinese_only(question_fun,'question_id')
+#que_tri_id, que_tri_content, line_tri_id, nan_tri_num = chinese_only(question_tri,'question_id')
+que_fun_tri_id, que_fun_tri_content, line_fun_tri_id, nan_fun_tri_num = chinese_only(question_fun_tri,'kh_id','content')
+#tf_fun,tfidf_fun,words_fun = get_bow(que_fun_content)
+#tf_tri,tfidf_tri,words_tri = get_bow(que_tri_content)
+tf_fun_tri,tfidf_fun_tri,words_fun_tri = get_bow(que_fun_tri_content)
+
+
+# In[18]:
+
+
+label_lo=[]
+for ii in que_fun_tri_id:
+    if ii=='hcwf4avcmp8l53s5iq010pelwlce000d':
+        label_lo.append('fun')
+    else:
+        label_lo.append('tri')
+
+
+# ### 灏嗘暟鎹垎涓烘祴璇曢泦鍜岃缁冮泦
+
+# In[19]:
+
+
+X_train, X_test, y_train, y_test = train_test_split(tfidf_fun_tri,label_lo, test_size = 0.5, random_state = 0)
+
+
+# In[20]:
+
+
+#train_fun_ind, test_fun_ind = train_test_split(range(tfidf_fun.shape[0]), test_size = 0.5, random_state = 0)
+#train_tri_ind, test_tri_ind = train_test_split(range(tfidf_tri.shape[0]), test_size = 0.5, random_state = 0)
+#train_ind, test_ind = train_test_split(range(tfidf_fun_tri.shape[0]), test_size = 0.5, random_state = 0)
+
+
+# ### 鏁堟灉璇勪环
+
+# In[21]:
+
+
+Logist2 = LogisticRegression()
+Logist2.fit(X_train, y_train)
+score = Logist2.score(X_test, y_test)
+predict2 = Logist2.predict(X_test)
+predict_prob2 = Logist2.predict_proba(X_test)[:,1]
+precision, recall, f_score, nnn = precision_recall_fscore_support(y_test, predict2)
+print('score: ',score,'\n','precision: ',precision,'\n','recall: ',recall,'\n','f_score: ',f_score)
+#auc_score = roc_auc_score(y_test, predict2)
+
+
+# # Task 3
+
+# In[22]:
+
+
+knowledge_hierarchy = pd.read_csv('../../camp_dataset/data/knowledge_hierarchy.csv', encoding='utf-8',usecols = ['id','name'],low_memory=False)
+knowledge_hierarchy.head()
+
+
+# In[23]:
+
+
+tem1, kh, tem2, tem3 = chinese_only(knowledge_hierarchy,'id','name')
+
+
+# In[24]:
+
+
+words_all = reduce(lambda x, y: x+' '+y, kh)
+
+
+# In[25]:
+
+
+#鍘婚櫎閲嶅鐨勫瓧璇?words_all_single = list(set(words_all.split()))
+
+
+# ### 杞藉叆缃戜笂宸茬粡璁粌濂界殑妯″瀷锛屾潵婧愶細https://github.com/Kyubyong/wordvectors
+
+# In[26]:
+
+
+model3 = Word2Vec.load('../../camp_dataset/zh/zh.bin')
+dict3 = dict()
+for word in words_all_single:
+    if word in model3.wv.vocab.keys():
+        vec = model3.wv[word]
+        dict3[word] = vec
+
+
+# ### 闅忔満閫夊彇5涓瘝锛屽苟鍒ゆ柇涓庡叾鏈€鐩歌繎鐨?0涓瘝
+
+# In[27]:
+
+
+n3=0
+while True:
+    words_random = random.sample(words_all_single, 1)[0]
+    if words_random in model3.wv.vocab.keys():
+        n3+=1
+        print('\n闅忔満鎶介€夌殑绗瑊}/5涓暟瀛楋細 {}'.format(n3,words_random),'\n')
+        print('鐩镐技搴︽渶楂樼殑10涓瘝涓猴細\n')
+        for i in model3.wv.most_similar(words_random):
+            print('{:<10}{:<20}'.format(i[0],i[1]))
+        print('\n-------------------')
+    if n3==5:
+        break
+
+
+# # Task 4
+
+# In[28]:
+
+
+model4 = Word2Vec([words_all.split()],min_count=1,size=200)
+
+
+# In[29]:
+
+
+dict4 = dict()
+for word in words_all_single:
+    if word in model4.wv.vocab.keys():
+        vec = model4.wv[word]
+        dict4[word] = vec
+n4 = 0
+while True:
+    words_random = random.sample(words_all_single,1)[0]
+    if words_random in model4.wv.vocab.keys():
+        n4 += 1
+        print('闅忔満鎶介€夌殑绗瑊}/5涓暟瀛楋細 {}'.format(n4,words_random),'\n')
+        print('鐩镐技搴︽渶楂樼殑10涓瘝涓猴細\n')
+        for i in model4.wv.most_similar(words_random):
+            print('{:<10}{}'.format(i[0],i[1]))
+        print('\n---------------')
+    if n4 == 5:
+        break
+
+
+# # Task 5
+
+# In[30]:
+
+
+que_fun_tri_content[0:5]
+
+
+# In[31]:
+
+
+def data_tage(cont):
+    data_taged = []
+    for i, doc in enumerate(cont):
+        docu = TaggedDocument(doc.split(),[i])
+        data_taged.append(docu)
+    return data_taged
+
+
+# In[32]:
+
+
+data_taged = data_tage(que_fun_tri_content)
+
+
+# In[33]:
+
+
+if 'model5' in vars():
+    del model5
+model5 = Doc2Vec(data_taged,min_count=1,vector_size=500)
+
+
+# ### 璁＄畻姣忎釜棰樼洰鐨勫悜閲?
+# In[34]:
+
+
+data_vecs = []
+for i in range(len(data_taged)):
+    data_vecs.append(model5.infer_vector(data_taged[i].words))
+
+
+# ### 鍒掑垎璁粌闆嗗拰娴嬭瘯闆嗗苟杩涜Logist鍥炲綊
+
+# In[35]:
+
+
+X_train5, X_test5, y_train5, y_test5 = train_test_split(data_vecs,label_lo, test_size = 0.5, random_state = 0)
+
+
+# In[36]:
+
+
+Logist5 = LogisticRegression()
+Logist5.fit(X_train5, y_train5)
+score5 = Logist5.score(X_test5, y_test5)
+predict5 = Logist5.predict(X_test5)
+predict_prob5 = Logist5.predict_proba(X_test5)[:,1]
+precision5, recall5, f_score5, nnn5 = precision_recall_fscore_support(y_test5, predict5)
+print('score: ',score5,'\n','precision: ',precision5,'\n','recall: ',recall5,'\n','f_score: ',f_score5)
+#auc_score = roc_auc_score(y_test5, predict5)
